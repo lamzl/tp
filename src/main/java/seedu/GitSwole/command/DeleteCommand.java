@@ -22,7 +22,7 @@ public class DeleteCommand extends Command {
      *
      * @param arguments The full command string entered by the user.
      */
-    public DeleteCommand(String arguments){
+    public DeleteCommand(String arguments) {
         this.arguments = arguments;
     }
 
@@ -87,7 +87,7 @@ public class DeleteCommand extends Command {
      *
      * @param workouts The current list of workouts.
      */
-    private void deleteExercise(WorkoutList workouts) throws GitSwoleException{
+    private void deleteExercise(WorkoutList workouts) throws GitSwoleException {
         int eIndex = arguments.indexOf("e/");
         int wIndex = arguments.indexOf("w/");
 
