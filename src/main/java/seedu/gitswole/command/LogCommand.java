@@ -12,13 +12,13 @@ import java.io.IOException;
 import java.util.logging.Level;
 
 /**
- * Represents a command that logs performance data for a workout session.
+ * Represents a command that logs performance data for a workout session with smart overwriting.
  * <p>
  * Supported formats:
  * <ul>
  *   <li>{@code log w/WORKOUT_NAME} — starts a session and lists exercises</li>
- *   <li>{@code log e/EXERCISE_NAME [w/WORKOUT_NAME] [wt/WEIGHT] [s/SETS] [r/REPS]} 
- *   — updates stats for an exercise and appends to history log. 
+ *   <li>{@code log e/EXERCISE_NAME [w/WORKOUT_NAME] [wt/WEIGHT] [s/SETS] [r/REPS] [remark/REMARK]} 
+ *   — updates stats for an exercise and updates the history log in a smart way. 
  *   If {@code w/} is omitted, the most recent active session name is used.</li>
  * </ul>
  */
@@ -56,7 +56,9 @@ public class LogCommand extends Command {
     }
 
     /**
-     * Starts a logging session for a specific workout and records the header in history.
+     * Starts or resumes a logging session for a specific workout.
+     * <p>
+     * Only writes a new header if no session for this workout exists for today.
      *
      * @param workouts The list of available workouts.
      * @param ui       The UI to display the session start message.
@@ -75,29 +77,31 @@ public class LogCommand extends Command {
             throw new GitSwoleException(GitSwoleException.ErrorType.NOT_FOUND, workoutName);
         }
 
-        // Record the session start in the history file
+        // SMART CHECK: Only write header if a session doesn't exist for today
         try {
-            historyStorage.writeSeparator();
-            historyStorage.writeSessionHeader(workout.getWorkoutName());
+            if (!historyStorage.hasSessionToday(workout.getWorkoutName())) {
+                historyStorage.writeSessionHeader(workout.getWorkoutName());
+                ui.showMessage("Session started for " + workout.getWorkoutName() + "! Let's get those gains.");
+            } else {
+                ui.showMessage("Resuming your " + workout.getWorkoutName() + " session for today!");
+            }
         } catch (IOException e) {
-            LOGGER.log(Level.WARNING, "Failed to write session header to history: " + e.getMessage());
+            LOGGER.log(Level.WARNING, "Failed to manage session header: " + e.getMessage());
         }
 
         // Set the "sticky" active session name
         workouts.setActiveWorkoutName(workout.getWorkoutName());
 
-        ui.showMessage("Session started for " + workout.getWorkoutName() + "! Let's get those gains.");
         ui.showLine();
         ui.showMessage(workout.getWorkoutName().toUpperCase() + " Workout Exercises:");
         ui.printExercises(workout.getExerciseList());
         ui.showLine();
-        ui.showMessage("Continue to log your workout by: log e/EXERCISE wt/WEIGHT s/SETS r/REPS");
+        ui.showMessage("Continue to log your workout by: log e/EXERCISE wt/WEIGHT s/SETS r/REPS remark/REMARK");
         ui.showLine();
     }
 
     /**
-     * Updates the performance statistics for a specific exercise and records it in history.
-     * Uses the active workout session if the {@code w/} flag is omitted.
+     * Updates statistics for an exercise and performs a smart update in the history file.
      *
      * @param workouts The list of available workouts.
      * @param ui       The UI to display the updated stats.
@@ -106,6 +110,7 @@ public class LogCommand extends Command {
     private void handleLogExercise(WorkoutList workouts, Ui ui) throws GitSwoleException {
         String exerciseName = Parser.parseValue(response, "e/");
         String workoutName = Parser.parseValue(response, "w/");
+        String remark = Parser.parseValue(response, "remark/");
 
         // Use the sticky session if w/ flag is missing
         if (workoutName == null) {
@@ -114,7 +119,7 @@ public class LogCommand extends Command {
 
         if (exerciseName == null || workoutName == null) {
             LOGGER.log(Level.WARNING, "LogExercise failed: Missing e/ flag or workout context.");
-            String usage = "log e/EXERCISE [w/WORKOUT] wt/WEIGHT s/SETS r/REPS";
+            String usage = "log e/EXERCISE [w/WORKOUT] wt/WEIGHT s/SETS r/REPS [remark/REMARK]";
             throw new GitSwoleException(GitSwoleException.ErrorType.INCOMPLETE_COMMAND, usage);
         }
 
@@ -131,7 +136,7 @@ public class LogCommand extends Command {
             throw new GitSwoleException(GitSwoleException.ErrorType.NOT_FOUND, exerciseName);
         }
 
-        // Update the stats: use existing value as default if flag is missing
+        // Update the stats in memory
         int weight = Parser.parseOptionalInt(response, "wt/", exercise.getWeight());
         int sets = Parser.parseOptionalInt(response, "s/", exercise.getSets());
         int reps = Parser.parseOptionalInt(response, "r/", exercise.getReps());
@@ -140,14 +145,21 @@ public class LogCommand extends Command {
         exercise.setSets(sets);
         exercise.setReps(reps);
 
-        // Record the exercise log in the history file
+        // SMART UPDATE: Update the specific exercise within today's session block in the file
         try {
-            historyStorage.writeExerciseLog(exercise);
+            // Ensure session exists (in case user jumped straight to log e/ without log w/)
+            if (!historyStorage.hasSessionToday(workoutName)) {
+                historyStorage.writeSessionHeader(workoutName);
+            }
+            historyStorage.updateExerciseLog(workoutName, exercise, remark);
         } catch (IOException e) {
-            LOGGER.log(Level.WARNING, "Failed to write exercise log to history: " + e.getMessage());
+            LOGGER.log(Level.WARNING, "Failed to update exercise log in history: " + e.getMessage());
         }
 
         ui.showMessage("Stats updated for " + exerciseName + " in " + workoutName + "!");
+        if (remark != null && !remark.isBlank()) {
+            ui.showMessage("Remark added: " + remark.trim());
+        }
         ui.printExercises(workout.getExerciseList());
         ui.showLine();
     }
